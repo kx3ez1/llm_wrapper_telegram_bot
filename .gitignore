@@ -1,0 +1,79 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheelhouse/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.env/
+.venv/
+venv/
+env/
+ENV/
+venv.bak/
+
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+secrets.json
+*.pem
+*.key
+token.txt
+
+# Logs and databases
+*.log
+logs/
+*.sqlite3
+
+# Unit test / coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Type checkers / caches
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Packaging metadata
+*.egg
+*.egg-info
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.bak
+*.swp
+
+# additional
+important.md
