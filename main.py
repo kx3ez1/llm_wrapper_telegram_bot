@@ -21,11 +21,18 @@ if not telegram_bot_token:
     logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
     exit(1)
 
+# Get bot password from environment (optional)
+bot_password = os.getenv("BOT_PASSWORD")
+if bot_password:
+    logger.info("Bot password protection enabled")
+else:
+    logger.warning("No bot password set - bot will be publicly accessible")
+
 from telegram_bot import TelegramBot
 from services import get_azure_ai_response_model_router2
 
 try:
-    bot = TelegramBot(telegram_bot_token)
+    bot = TelegramBot(telegram_bot_token, bot_password)
 except ValueError as e:
     logger.error(f"Failed to initialize bot: {e}")
     exit(1)
@@ -63,6 +70,11 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
     try:
         logger.info(f"Processing message from {username} ({user_id}): {text[:50]}{'...' if len(text) > 50 else ''}")
         
+        # Check authentication first
+        if bot.handle_authentication(chat_id, user_id, text):
+            # Message was handled by authentication system
+            return
+        
         # Parse and handle commands
         command_data = bot.parse_command(text)
         if command_data:
@@ -83,6 +95,8 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
             if reply_to_message:
                 # Handle reply message - combine with original for context
                 logger.info(f"Processing reply message from {username}")
+                # Send processing message
+                bot.send_processing_message(chat_id, message.get('message_id'))
                 context = bot.format_reply_context(reply_to_message, message)
                 response = get_azure_ai_response_model_router2(context)
                 result = bot.send_message(chat_id, response, reply_to_message_id=message.get('message_id'))
@@ -93,6 +107,8 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
             else:
                 # Treat as regular user prompt, process and show response
                 logger.info(f"Processing AI request for user {username}")
+                # Send processing message
+                bot.send_processing_message(chat_id, message.get('message_id'))
                 response = get_azure_ai_response_model_router2(text)
                 result = bot.send_message(chat_id, response)
                 if result.get('ok'):
