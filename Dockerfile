@@ -24,14 +24,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create non-root user for security
-RUN adduser --disabled-password --gecos '' appuser && \
-    chown -R appuser:appuser /app
-USER appuser
+# Create logs directory with write permissions
+RUN mkdir -p /app/logs && \
+    chmod 777 /app/logs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import os, requests; requests.get('https://api.telegram.org/bot' + os.environ['TELEGRAM_BOT_TOKEN'] + '/getMe', timeout=5)" || exit 1
 
-# Run the application
+# Run the application (as root to ensure write permissions to mounted volumes)
 CMD ["python", "main.py"]
