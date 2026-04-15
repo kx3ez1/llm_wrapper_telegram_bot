@@ -6,14 +6,7 @@ import threading
 import random
 from concurrent.futures import ThreadPoolExecutor
 
-# Configure logging
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    logger.setLevel(logging.INFO)
 
 class TelegramBot:
     """
@@ -145,7 +138,7 @@ class TelegramBot:
             params['offset'] = offset
         
         try:
-            response = self.session.get(url, params=params)
+            response = self.session.get(url, params=params, timeout=15)
             response.raise_for_status()
             result = response.json()
             if not result.get("ok"):

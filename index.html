@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome Page</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        padding: 40px;
+        max-width: 600px;
+        text-align: center;
+      }
+
+      header {
+        margin-bottom: 30px;
+      }
+
+      h1 {
+        color: #333;
+        font-size: 2.5em;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        font-size: 1.1em;
+        font-weight: 300;
+      }
+
+      .content {
+        margin: 30px 0;
+        line-height: 1.8;
+      }
+
+      .content p {
+        color: #555;
+        font-size: 1em;
+        margin-bottom: 15px;
+      }
+
+      .features {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        margin: 30px 0;
+        gap: 20px;
+      }
+
+      .feature {
+        flex: 1;
+        min-width: 150px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+      }
+
+      .feature h3 {
+        color: #667eea;
+        margin-bottom: 10px;
+      }
+
+      .feature p {
+        color: #666;
+        font-size: 0.9em;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+        margin-top: 30px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 12px 30px;
+        font-size: 1em;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-weight: 600;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+      }
+
+      .btn-secondary {
+        background: #f0f0f0;
+        color: #333;
+        border: 2px solid #667eea;
+      }
+
+      .btn-secondary:hover {
+        background: #667eea;
+        color: white;
+      }
+
+      footer {
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px solid #eee;
+        color: #999;
+        font-size: 0.9em;
+      }
+
+      @media (max-width: 600px) {
+        .container {
+          padding: 20px;
+        }
+
+        h1 {
+          font-size: 2em;
+        }
+
+        .features {
+          flex-direction: column;
+        }
+
+        .button-group {
+          flex-direction: column;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Welcome!</h1>
+        <p class="subtitle">Build something amazing</p>
+      </header>
+
+      <div class="content">
+        <p>
+          This is a simple and elegant landing page designed with modern CSS and
+          responsive layout.
+        </p>
+      </div>
+
+      <div class="features">
+        <div class="feature">
+          <h3>🎨 Design</h3>
+          <p>Beautiful and clean interface</p>
+        </div>
+        <div class="feature">
+          <h3>📱 Responsive</h3>
+          <p>Works on all devices</p>
+        </div>
+        <div class="feature">
+          <h3>⚡ Fast</h3>
+          <p>Optimized performance</p>
+        </div>
+      </div>
+
+      <div class="button-group">
+        <button class="btn-primary">Get Started</button>
+        <button class="btn-secondary">Learn More</button>
+      </div>
+
+      <footer>
+        <p>&copy; 2025 Your Company. All rights reserved.</p>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,12 +1,20 @@
+
+# Standard library imports
+import os
 import time
-import requests
 import logging
 from logging.handlers import RotatingFileHandler
-from dotenv import load_dotenv
-import os
-import threading
 from concurrent.futures import ThreadPoolExecutor
-import asyncio
+ 
+# Third-party imports
+import requests
+from dotenv import load_dotenv
+
+
+# Local imports
+from telegram_bot import TelegramBot
+from services import get_openai_response
+
 
 load_dotenv()
 
@@ -14,23 +22,26 @@ load_dotenv()
 log_dir = '/app/logs'
 os.makedirs(log_dir, exist_ok=True)
 
-# Configure logging
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Configure logging — single source of truth; child loggers propagate here
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-file_handler = RotatingFileHandler(
+_file_handler = RotatingFileHandler(
     os.path.join(log_dir, 'bot.log'),
-    maxBytes=5*1024*1024,  # 5 MB
+    maxBytes=5 * 1024 * 1024,  # 5 MB
     backupCount=3
 )
-file_handler.setFormatter(formatter)
+_file_handler.setFormatter(_formatter)
+_file_handler.setLevel(_log_level)
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_formatter)
+_console_handler.setLevel(_log_level)
 
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[file_handler, console_handler]
-)
+logging.root.setLevel(_log_level)
+logging.root.addHandler(_file_handler)
+logging.root.addHandler(_console_handler)
+
 logger = logging.getLogger(__name__)
 
 telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -45,14 +56,24 @@ if bot_password:
 else:
     logger.warning("No bot password set - bot will be publicly accessible")
 
-from telegram_bot import TelegramBot
-from services import get_azure_ai_response_model_router2
+
 
 try:
     bot = TelegramBot(telegram_bot_token, bot_password)
 except ValueError as e:
     logger.error(f"Failed to initialize bot: {e}")
     exit(1)
+
+# Delete any active webhook to avoid 409 conflicts with long-polling
+try:
+    delete_webhook_url = f"https://api.telegram.org/bot{telegram_bot_token}/deleteWebhook"
+    wh_response = requests.post(delete_webhook_url, json={"drop_pending_updates": False})
+    if wh_response.status_code == 200 and wh_response.json().get("result"):
+        logger.info("Webhook cleared — long-polling is safe to start")
+    else:
+        logger.warning(f"deleteWebhook returned unexpected result: {wh_response.text}")
+except Exception as e:
+    logger.error(f"Error clearing webhook: {e}")
 
 # Set Telegram bot command menu for better UI experience
 command_menu = [
@@ -115,7 +136,7 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
                 # Send processing message
                 bot.send_processing_message(chat_id, message.get('message_id'))
                 context = bot.format_reply_context(reply_to_message, message)
-                response = get_azure_ai_response_model_router2(context)
+                response = get_openai_response(context)
                 result = bot.send_message(chat_id, response, reply_to_message_id=message.get('message_id'))
                 if result.get('ok'):
                     logger.info(f"Successfully sent AI reply response to {username}")
@@ -126,7 +147,7 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
                 logger.info(f"Processing AI request for user {username}")
                 # Send processing message
                 bot.send_processing_message(chat_id, message.get('message_id'))
-                response = get_azure_ai_response_model_router2(text)
+                response = get_openai_response(text)
                 result = bot.send_message(chat_id, response)
                 if result.get('ok'):
                     logger.info(f"Successfully sent AI response to {username}")
@@ -137,8 +158,8 @@ def process_message_async(bot, message, chat_id, text, user_id, username):
         logger.error(f"Error processing message from {username}: {e}")
         try:
             bot.send_message(chat_id, "Sorry, I encountered an error processing your request. Please try again.")
-        except:
-            pass
+        except Exception as send_err:
+            logger.error(f"Failed to send error message to {username}: {send_err}")
 
 logger.info("Bot started successfully with concurrent processing. Listening for messages...")
 
@@ -152,8 +173,12 @@ while True:
             continue
             
         retry_count = 0  # Reset retry count on successful update
-        
-        for update in updates.get('result', []):
+
+        results = updates.get('result', [])
+        if results:
+            logger.debug(f"Got {len(results)} update(s) from Telegram")
+
+        for update in results:
             try:
                 message = update.get('message', {})
                 chat_id = message.get('chat', {}).get('id')
