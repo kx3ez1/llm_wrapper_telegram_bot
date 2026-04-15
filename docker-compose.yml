@@ -16,6 +16,8 @@ services:
     volumes:
       # Mount logs directory for persistent logging
       - ./logs:/app/logs
+      # Mount data directory for persistent SQLite thread store
+      - ./data:/app/data
     networks:
       - bot-network
     logging:

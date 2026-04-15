@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 
 def get_openai_response(
     prompt: str,
-    system_message: str = "Respond directly to the user's request. Use markdown formatting for emphasis, but do not include the word 'markdown' in your response. Be conversational and helpful."
+    system_message: str = "Respond directly to the user's request. Use markdown formatting for emphasis, but do not include the word 'markdown' in your response. Be conversational and helpful.",
+    messages: list = None,
 ) -> str:
     """
     Process a prompt using the OpenAI client pointed at a custom Azure endpoint
@@ -67,12 +68,17 @@ def get_openai_response(
     logger.info(f"Processing prompt via OpenAI client: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
 
     try:
-        completion = client.chat.completions.create(
-            model=deployment,
-            messages=[
+        if messages:
+            # Pre-built messages list (thread context) — append current prompt as final user turn
+            full_messages = [{"role": "system", "content": system_message}] + messages + [{"role": "user", "content": prompt}]
+        else:
+            full_messages = [
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt},
-            ],
+            ]
+        completion = client.chat.completions.create(
+            model=deployment,
+            messages=full_messages,
             max_completion_tokens=128000,
         )
         response_text = completion.choices[0].message.content or ""

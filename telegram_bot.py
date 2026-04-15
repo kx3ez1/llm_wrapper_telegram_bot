@@ -1,10 +1,13 @@
+import os
 import requests
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 import time
 import threading
 import random
 from concurrent.futures import ThreadPoolExecutor
+import tiktoken
+from thread_store import SQLiteThreadStore
 
 logger = logging.getLogger(__name__)
 
@@ -12,13 +15,20 @@ class TelegramBot:
     """
     TelegramBot provides methods to interact with the Telegram Bot API for text-only messaging and command handling.
     """
-    def __init__(self, token: str, bot_password: str = None):
+    def __init__(self, token: str, admin_id: int = None, bot_password: str = None):
         if not token or not token.strip():
             raise ValueError("Telegram bot token cannot be empty")
         self.token = token
+        self.admin_id = admin_id
         self.bot_password = bot_password
-        self.authenticated_users = set()  # Track authenticated users
         self.api_url = f"https://api.telegram.org/bot{self.token}/"
+        db_path = os.getenv("THREAD_DB_PATH", "/app/data/threads.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.thread_store = SQLiteThreadStore(db_path)
+        # In-memory cache of authenticated user_ids — loaded from DB on startup
+        self.authenticated_users: set = self.thread_store.load_authenticated_user_ids()
+        logger.info(f"Loaded {len(self.authenticated_users)} authenticated user(s) from DB")
+        self._tiktoken_enc = tiktoken.get_encoding("cl100k_base")
         # Optimize session for speed
         self.session = requests.Session()
         self.session.timeout = 10  # Reduced timeout for faster failures
@@ -224,6 +234,12 @@ class TelegramBot:
             return self._handle_status_command(chat_id, user_info)
         elif command == 'clear':
             return self._handle_clear_command(chat_id)
+        elif command == 'newtoken':
+            return self._handle_newtoken_command(chat_id, user_info)
+        elif command == 'revoke':
+            return self._handle_revoke_command(chat_id, user_info, args)
+        elif command == 'tokens':
+            return self._handle_tokens_command(chat_id, user_info)
         else:
             return self._handle_unknown_command(chat_id, command)
     
@@ -231,7 +247,6 @@ class TelegramBot:
         """
         Handle /start and /help commands.
         """
-        auth_info = "\n/logout - Log out from the bot\n" if self.bot_password else ""
         help_text = (
             "🤖 *Available Commands:*\n\n"
             "/start - Start the bot\n"
@@ -239,7 +254,7 @@ class TelegramBot:
             "/about - About this bot\n"
             "/ping - Check if bot is responsive\n"
             "/status - Show your user status\n"
-            "/clear - Clear chat (info only)" + auth_info + "\n"
+            "/clear - Clear chat (info only)\n\n"
             "💬 *How to use:*\n"
             "Just send me any message and I'll respond with AI assistance!"
         )
@@ -305,6 +320,63 @@ class TelegramBot:
         result = self.send_message(chat_id, clear_text, parse_mode="Markdown")
         return result.get('ok', False)
     
+    def _handle_newtoken_command(self, chat_id: int, user_info: Dict) -> bool:
+        if not self.is_admin(user_info.get('id')):
+            result = self.send_message(chat_id, "⛔ Admin only.")
+            return result.get('ok', False)
+        token = self.thread_store.create_token(created_by=user_info['id'])
+        result = self.send_message(
+            chat_id,
+            f"🔑 *New token created:*\n\n`{token}`\n\nShare this with the user. It works immediately.",
+            parse_mode="Markdown",
+        )
+        return result.get('ok', False)
+
+    def _handle_revoke_command(self, chat_id: int, user_info: Dict, args: str) -> bool:
+        if not self.is_admin(user_info.get('id')):
+            result = self.send_message(chat_id, "⛔ Admin only.")
+            return result.get('ok', False)
+        token = args.strip().upper()
+        if not token:
+            result = self.send_message(chat_id, "Usage: `/revoke TOKEN`", parse_mode="Markdown")
+            return result.get('ok', False)
+        # Find who owns this token before revoking so we can evict from cache
+        owner_id = self.thread_store.get_user_id_for_token(token)
+        ok = self.thread_store.revoke_token(token)
+        if ok:
+            if owner_id and owner_id in self.authenticated_users:
+                # Re-check DB — user may have other active tokens
+                if not self.thread_store.is_user_authenticated(owner_id):
+                    self.authenticated_users.discard(owner_id)
+                    logger.info(f"User {owner_id} evicted from session after token {token} revoked")
+            result = self.send_message(chat_id, f"✅ Token `{token}` revoked.", parse_mode="Markdown")
+        else:
+            result = self.send_message(chat_id, f"❌ Token `{token}` not found.", parse_mode="Markdown")
+        return result.get('ok', False)
+
+    def _handle_tokens_command(self, chat_id: int, user_info: Dict) -> bool:
+        if not self.is_admin(user_info.get('id')):
+            result = self.send_message(chat_id, "⛔ Admin only.")
+            return result.get('ok', False)
+        tokens = self.thread_store.list_tokens()
+        if not tokens:
+            result = self.send_message(chat_id, "No tokens yet. Use /newtoken to create one.")
+            return result.get('ok', False)
+        lines = ["*Tokens:*\n"]
+        for t in tokens:
+            if not t['is_active']:
+                icon = "❌"
+                note = "revoked"
+            elif t['used_by']:
+                icon = "✅"
+                note = f"used by `{t['used_by']}`"
+            else:
+                icon = "⏳"
+                note = "unused"
+            lines.append(f"{icon} `{t['token']}` — {note}")
+        result = self.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+        return result.get('ok', False)
+
     def _handle_unknown_command(self, chat_id: int, command: str) -> bool:
         """
         Handle unknown commands.
@@ -353,60 +425,172 @@ Please respond to this conversation considering both messages for context."""
         return context
     
     def is_authenticated(self, user_id: int) -> bool:
-        """
-        Check if a user is authenticated.
-        """
-        return user_id in self.authenticated_users
-    
-    def authenticate_user(self, user_id: int, password: str) -> bool:
-        """
-        Authenticate a user with the bot password.
-        """
-        if not self.bot_password:
-            # If no password is set, allow all users
-            return True
-            
-        if password == self.bot_password:
-            self.authenticated_users.add(user_id)
-            return True
-        return False
-    
-    def logout_user(self, user_id: int) -> None:
-        """
-        Log out a user (remove from authenticated users).
-        """
-        self.authenticated_users.discard(user_id)
-    
+        return user_id in self.authenticated_users or user_id == self.admin_id
+
+    def is_admin(self, user_id: int) -> bool:
+        return self.admin_id is not None and user_id == self.admin_id
+
     def handle_authentication(self, chat_id: int, user_id: int, text: str) -> bool:
         """
-        Handle authentication flow. Returns True if message was handled by auth system.
+        Token-based auth flow. Returns True if the message was consumed by auth.
+        Admin is always authenticated — no token needed.
         """
-        if not self.bot_password:
-            # No password protection enabled
+        # Admin bypasses everything
+        if self.is_admin(user_id):
             return False
-            
-        # Handle logout command
-        if text.strip().lower() == "/logout":
-            self.logout_user(user_id)
-            self.send_message(chat_id, "🔓 You have been logged out. Send /start to authenticate again.")
-            return True
-            
-        # If user is not authenticated
-        if not self.is_authenticated(user_id):
-            if text.strip().lower() == "/start":
-                self.send_message(chat_id, "🔐 **Bot Authentication Required**\n\nThis bot is password protected. Please enter the bot password to continue:", parse_mode="Markdown")
-                return True
-            elif text.strip() == self.bot_password:
-                self.authenticate_user(user_id, text.strip())
-                self.send_message(chat_id, "✅ **Authentication Successful!**\n\nYou can now use all bot features. Type /help to see available commands.", parse_mode="Markdown")
-                return True
+
+        cmd = text.strip().lower()
+
+        if cmd == "/start":
+            if self.is_authenticated(user_id):
+                self.send_message(chat_id, "✅ You're already authenticated. Type /help to see commands.")
             else:
-                # Any other message from unauthenticated user
-                self.send_message(chat_id, "🔒 **Access Denied**\n\nYou must authenticate first. Send /start to begin authentication.", parse_mode="Markdown")
+                self.send_message(
+                    chat_id,
+                    "🔐 *Access token required*\n\nSend your access token to continue.",
+                    parse_mode="Markdown",
+                )
+            return True
+
+        if not self.is_authenticated(user_id):
+            candidate = text.strip()
+            # Global password check (admin-only knowledge, no DB entry needed)
+            if self.bot_password and candidate == self.bot_password:
+                self.authenticated_users.add(user_id)
+                self.send_message(
+                    chat_id,
+                    "✅ *Access granted!*\n\nType /help to see available commands.",
+                    parse_mode="Markdown",
+                )
                 return True
-                
+            # Per-user token check
+            ok = self.thread_store.claim_token(candidate.upper(), user_id)
+            if ok:
+                self.authenticated_users.add(user_id)
+                self.send_message(
+                    chat_id,
+                    "✅ *Access granted!*\n\nType /help to see available commands.",
+                    parse_mode="Markdown",
+                )
+            else:
+                self.send_message(
+                    chat_id,
+                    "🔒 *Invalid or revoked token.*\n\nContact the admin for an access token.",
+                    parse_mode="Markdown",
+                )
+            return True
+
         return False
     
+    def store_thread_message(self, user_id: int, message_id: int, chat_id: int, role: str, content: str, parent_id: int = None) -> None:
+        """
+        Persist a message to the SQLite thread store.
+        Only called when /thread is used.
+        """
+        self.thread_store.store(user_id, message_id, chat_id, role, content, parent_id)
+
+    def _count_tokens(self, text: str) -> int:
+        return len(self._tiktoken_enc.encode(text))
+
+    def parse_thread_range(self, args: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        """
+        Parse /thread range args like Python slice: [start]:[stop]:[step]
+        Returns (start, stop, step) — any can be None meaning use default.
+        Single int is treated as stop (e.g. /thread 3 → go back 3 levels).
+        """
+        args = args.strip()
+        if not args:
+            return None, None, None
+        parts = args.split(":")
+        def _int(s):
+            s = s.strip()
+            return int(s) if s else None
+        try:
+            if len(parts) == 1:
+                val = _int(parts[0])
+                return 1, val, None  # start=1, stop=val, step=None
+            elif len(parts) == 2:
+                return _int(parts[0]) or 1, _int(parts[1]), None
+            elif len(parts) == 3:
+                return _int(parts[0]) or 1, _int(parts[1]), _int(parts[2])
+            else:
+                return None, None, None  # invalid
+        except ValueError:
+            return None, None, None  # parse error
+
+    def build_thread_context(
+        self,
+        user_id: int,
+        root_message_id: int,
+        start: Optional[int],
+        stop: Optional[int],
+        step: Optional[int],
+        max_tokens: int = 120000,
+        system_prompt_tokens: int = 200,
+        response_reserve: int = 2000,
+    ) -> Tuple[List[Dict], int]:
+        """
+        Walk the thread chain from root_message_id upward for a specific user.
+        Returns (messages_list, count_included).
+
+        Chain is collected as depths: depth 1 = direct parent, depth 2 = grandparent, etc.
+        Range [start:stop:step] selects which depths to include (1-based, like Python range).
+        Default (all None): include all depths within token budget.
+        Token budget = max_tokens - system_prompt_tokens - response_reserve.
+        """
+        budget = max_tokens - system_prompt_tokens - response_reserve
+
+        # Walk full chain upward, collect (depth, message)
+        chain = []
+        current_id = root_message_id
+        depth = 0
+        while current_id is not None:
+            entry = self.thread_store.get(user_id, current_id)
+            if not entry:
+                break
+            depth += 1
+            chain.append((depth, entry))
+            current_id = entry.get("parent_id")
+
+        if not chain:
+            return [], 0
+
+        max_depth = chain[-1][0]
+
+        def _resolve(val):
+            """Convert negative index to positive depth (Python-style, from oldest end)."""
+            if val is None or val >= 0:
+                return val
+            resolved = max_depth + val + 1
+            return max(1, resolved)
+
+        # Build depth indices to include based on range
+        if start is None and stop is None and step is None:
+            depths_to_include = list(range(1, max_depth + 1))
+        else:
+            _start = _resolve(start) or 1
+            _stop = _resolve(stop) if stop is not None else max_depth
+            _step = step or 1
+            depths_to_include = list(range(_start, _stop + 1, _step))
+
+        # Filter chain to only selected depths
+        selected = [(d, e) for d, e in chain if d in depths_to_include]
+
+        # Apply token budget — fill from most recent (lowest depth) until budget exhausted
+        included = []
+        used_tokens = 0
+        for depth_val, entry in selected:  # already ordered nearest-first
+            tokens = self._count_tokens(entry["content"])
+            if used_tokens + tokens > budget:
+                break
+            included.append((depth_val, entry))
+            used_tokens += tokens
+
+        # Reverse to chronological order (oldest first) for OpenAI messages array
+        included.reverse()
+        messages = [{"role": e["role"], "content": e["content"]} for _, e in included]
+        return messages, len(messages)
+
     def show_commands(self, chat_id: int):
         """
         Deprecated: Use handle_command with 'help' instead.
