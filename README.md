@@ -1,40 +1,41 @@
 # LLM Wrapper Telegram Bot
 
-A fast, production-ready Telegram bot that leverages Azure AI for intelligent, markdown-formatted responses. Includes Docker support, health checks, and robust command handling.
+A fast, production-ready Telegram bot using the OpenAI SDK pointed at a custom Azure endpoint. Returns markdown-formatted AI responses with optional password protection, Docker support, and concurrent message processing.
 
 ## Features
 
-- **Telegram Bot API** integration
-- **Azure AI** (OpenAI-compatible) backend
+- **Telegram Bot API** integration via long-polling
+- **OpenAI SDK** → custom Azure endpoint backend
 - Markdown formatting in responses
-- Command handling: `/start`, `/help`, `/about`, `/ping`, `/status`, `/clear`
-- Error handling and logging
+- Command handling: `/start`, `/help`, `/about`, `/ping`, `/status`, `/clear`, `/logout`
+- Optional password protection (`BOT_PASSWORD`)
+- Reply-with-context: replying to a message sends both messages as context to AI
+- Auto-splits responses longer than 4096 chars
+- Error handling and rotating file logging
 - Docker & Docker Compose support
-- Health checks and resource limits
-- Concurrent message processing for speed
+- Concurrent message processing (ThreadPoolExecutor)
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Docker & Docker Compose (for containerized deployment)
 - Telegram Bot Token ([@BotFather](https://t.me/botfather))
-- Azure AI API Key
+- Azure OpenAI API key and endpoint
 
 ### 2. Setup Environment
 
-Copy the example environment file and edit with your credentials:
-```sh
-cp .env.example .env
-# Edit .env and set TELEGRAM_BOT_TOKEN and AZURE_API_KEY
-```
-
-Or create `.env` manually:
+Create `.env` in the project root:
 ```env
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-AZURE_API_KEY=your_azure_api_key
-ENVIRONMENT=development
+OPENAI_AZURE_API_KEY=your_azure_api_key
+OPENAI_AZURE_ENDPOINT=https://your-resource.openai.azure.com/openai/v1
+OPENAI_AZURE_DEPLOYMENT=gpt-5-nano
+
+# Optional
+BOT_PASSWORD=your_bot_password        # Enables password protection
+LOG_LEVEL=INFO                        # DEBUG, INFO, WARNING, ERROR
 ```
 
 ### 3. Run Locally
@@ -47,6 +48,11 @@ pip install -r requirements.txt
 Start the bot:
 ```sh
 python main.py
+```
+
+Or use the run script:
+```sh
+./run.sh
 ```
 
 ### 4. Run with Docker
@@ -70,18 +76,30 @@ Stop services:
 docker compose down
 ```
 
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from @BotFather |
+| `OPENAI_AZURE_API_KEY` | Yes | — | Azure OpenAI API key |
+| `OPENAI_AZURE_ENDPOINT` | No | `https://customwrapper1.openai.azure.com/openai/v1` | Azure endpoint URL |
+| `OPENAI_AZURE_DEPLOYMENT` | No | `gpt-5-nano` | Model deployment name |
+| `BOT_PASSWORD` | No | — | Enables password protection if set |
+| `LOG_LEVEL` | No | `INFO` | Logging verbosity |
+
 ## File Structure
 
 ```
-├── main.py                # Entry point, bot loop
-├── telegram_bot.py        # TelegramBot class and command handling
-├── services.py            # Azure AI integration
+├── main.py                # Entry point, bot loop, concurrent processing
+├── telegram_bot.py        # TelegramBot class, command handling, auth
+├── services.py            # OpenAI/Azure AI integration
 ├── requirements.txt       # Python dependencies
 ├── Dockerfile             # Docker build
 ├── docker-compose.yml     # Docker Compose config
-├── setup-docker.sh        # Setup script
+├── setup-docker.sh        # Docker setup script
+├── run.sh                 # Local run script
 ├── .env                   # Environment variables (not committed)
-├── logs/                  # Logs directory
+├── logs/                  # Rotating log files
 ```
 
 ## Usage
@@ -89,30 +107,38 @@ docker compose down
 - Start a chat with your bot on Telegram.
 - Use `/help` to see available commands.
 - Send any message for an AI-powered response.
-- Replies to messages are handled with context.
+- Reply to any message — the bot sends both messages as context to the AI.
+
+## Authentication
+
+If `BOT_PASSWORD` is set, users must authenticate before the bot responds:
+
+1. Send `/start` — bot prompts for password
+2. Send the password — bot grants access
+3. Send `/logout` — revokes access
+
+Without `BOT_PASSWORD`, the bot is publicly accessible.
 
 ## Customization
 
-- **AI Prompting:** Edit the `system_message` in [`get_azure_ai_response_model_router2`](services.py) for custom AI behavior.
-- **Logging:** Logs are written to `logs/` and console.
-- **Resource Limits:** Adjust in [`docker-compose.yml`](docker-compose.yml).
+- **AI Prompting:** Edit the `system_message` parameter in [`get_openai_response`](services.py) for custom AI behavior.
+- **Model:** Set `OPENAI_AZURE_DEPLOYMENT` in `.env`.
+- **Logging:** Logs rotate at 5 MB, 3 backups, written to `logs/bot.log` and console.
+- **Resource Limits:** Adjust memory/CPU in [`docker-compose.yml`](docker-compose.yml).
+- **Concurrency:** Change `max_workers` in `main.py` (default: 5 threads).
 
 ## Security
 
 - Never commit `.env` or secrets.
-- Use strong API keys and passwords.
 - Run containers as non-root (already configured).
+- Use `BOT_PASSWORD` to restrict access to authorized users.
 
 ## Troubleshooting
 
-- Check logs: `logs/` or `docker compose logs`
-- Ensure environment variables are set
+- Check logs: `logs/bot.log` or `docker compose logs -f telegram-bot`
+- Ensure all required environment variables are set
 - For Docker issues, see [DOCKER.md](DOCKER.md)
 
 ## License
 
 MIT License
-
----
-
-**Maintained by:** [Your Name or Organization]
