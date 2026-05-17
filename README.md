@@ -82,8 +82,8 @@ docker compose down
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from @BotFather |
 | `OPENAI_AZURE_API_KEY` | Yes | — | Azure OpenAI API key |
-| `OPENAI_AZURE_ENDPOINT` | No | `https://customwrapper1.openai.azure.com/openai/v1` | Azure endpoint URL |
-| `OPENAI_AZURE_DEPLOYMENT` | No | `gpt-5-nano` | Model deployment name |
+| `OPENAI_AZURE_ENDPOINT` | Yes | `https://customwrapper1.openai.azure.com/openai/v1` | Azure endpoint URL |
+| `OPENAI_AZURE_DEPLOYMENT` | Yes | `gpt-5-nano` | Model deployment name |
 | `BOT_PASSWORD` | No | — | Enables password protection if set |
 | `LOG_LEVEL` | No | `INFO` | Logging verbosity |
 
